@@ -1,0 +1,125 @@
+name: Android release (Managed Google Play)
+
+# Builds the production app bundle (.aab) and APK, signed with the private upload
+# key stored in GitHub secrets, and attaches it to a DRAFT GitHub release.
+# Draft releases are visible only to people with write access to the repo.
+# Run it from Actions > "Android release" > Run workflow. See docs/RELEASE.md.
+on:
+  workflow_dispatch:
+    inputs:
+      signature_hash:
+        description: >-
+          Signature hash of Google's app signing key (from the installed app:
+          Settings > About, or the Play Console). Leave empty for the first
+          release; the upload key's hash is used then.
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the release key is set up
+        run: |
+          for v in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Missing release key secret ($v). See docs/RELEASE.md."
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install packages
+        run: flutter pub get
+
+      - name: Cache native OpenCV builds
+        uses: actions/cache@v4
+        with:
+          path: .dart_tool/hooks_runner
+          key: opencv-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Analyze and test
+        run: |
+          flutter analyze
+          flutter test --exclude-tags screenshots
+
+      - name: Install the release key
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          cat > android/key.properties <<EOF
+          storeFile=$RUNNER_TEMP/upload.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Work out the Microsoft sign-in hash
+        id: hash
+        env:
+          GIVEN: ${{ inputs.signature_hash }}
+        run: |
+          UPLOAD=$(keytool -exportcert -alias "$KEY_ALIAS" \
+            -keystore "$RUNNER_TEMP/upload.jks" -storepass "$STORE_PASSWORD" \
+            | openssl sha1 -binary | openssl base64)
+          HASH="${GIVEN:-$UPLOAD}"
+          ENCODED=$(python3 -c "import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=''))" "$HASH")
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "encoded=$ENCODED" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Microsoft sign-in (Azure > Android platform)"
+            echo "- Package name: \`com.armscan.armscan\`"
+            echo "- Signature hash built into this release: \`$HASH\`"
+            echo "- Upload key hash: \`$UPLOAD\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The Managed Google Play upload page in Intune may ask for either an
+      # app bundle or an APK, so both are built with the same key and hash.
+      - name: Build app bundle and APK
+        env:
+          ORG_GRADLE_PROJECT_msalSignatureHash: ${{ steps.hash.outputs.hash }}
+          REDIRECT: msauth://com.armscan.armscan/${{ steps.hash.outputs.encoded }}
+        run: |
+          flutter build appbundle --release --target-platform android-arm64 \
+            --dart-define=ARMSCAN_MS_ANDROID_REDIRECT=$REDIRECT
+          flutter build apk --release --target-platform android-arm64 \
+            --dart-define=ARMSCAN_MS_ANDROID_REDIRECT=$REDIRECT
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HASH: ${{ steps.hash.outputs.hash }}
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
+          NAME="${VERSION%%+*}"
+          TAG="v$NAME-build${VERSION##*+}"
+          cp build/app/outputs/bundle/release/app-release.aab "ArmScan-$NAME.aab"
+          cp build/app/outputs/flutter-apk/app-release.apk "ArmScan-$NAME.apk"
+          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
+          gh release create "$TAG" "ArmScan-$NAME.aab" "ArmScan-$NAME.apk" --draft \
+            --target "$GITHUB_SHA" \
+            --title "ArmScan $NAME (build ${VERSION##*+})" \
+            --notes "Upload ArmScan-$NAME.aab (or the .apk if the page asks for one) to Managed Google Play as a private app (see docs/RELEASE.md). Microsoft sign-in hash built in: $HASH"
+
+      - name: Remove the key from the runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks" android/key.properties

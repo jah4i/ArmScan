@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -33,6 +35,15 @@ android {
             (project.findProperty("msalSignatureHash") as String?) ?: "g+zM9Zq6n3BRC10bbVes7QVBx5k="
     }
 
+    // Production signing: android/key.properties (never committed) points at
+    // the private release key. CI writes it from GitHub secrets; see
+    // docs/RELEASE.md. Without it, builds use the shared development key.
+    val releaseProps = Properties().apply {
+        val f = rootProject.file("key.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    val hasReleaseKey = releaseProps.getProperty("storeFile") != null
+
     signingConfigs {
         // Shared development key, committed on purpose so every build (local
         // or CI) has the same signature: test installs upgrade in place and
@@ -44,6 +55,14 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        if (hasReleaseKey) {
+            create("production") {
+                storeFile = rootProject.file(releaseProps.getProperty("storeFile"))
+                storePassword = releaseProps.getProperty("storePassword")
+                keyAlias = releaseProps.getProperty("keyAlias")
+                keyPassword = releaseProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -51,7 +70,8 @@ android {
             signingConfig = signingConfigs.getByName("dev")
         }
         release {
-            signingConfig = signingConfigs.getByName("dev")
+            signingConfig =
+                signingConfigs.getByName(if (hasReleaseKey) "production" else "dev")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

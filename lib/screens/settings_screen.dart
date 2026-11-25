@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../app/services.dart';
@@ -100,12 +103,50 @@ class SettingsScreen extends StatelessWidget {
               const ListTile(
                 leading: Icon(Icons.info_outline),
                 title: Text('ArmScan'),
-                subtitle: Text('Version 0.5.0'),
+                subtitle: Text('Version $appVersion'),
               ),
+              if (Platform.isAndroid) const _SignatureTile(),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// Shown on the Settings screen; keep in step with pubspec.yaml.
+const appVersion = '1.0.0';
+
+/// The signature hash of the installed app, for the Android platform of the
+/// Microsoft app registration in Azure. Tap to copy.
+class _SignatureTile extends StatelessWidget {
+  const _SignatureTile();
+
+  static const _channel = MethodChannel('armscan/app');
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: _channel
+          .invokeMethod<String>('signatureHash')
+          .catchError((Object _) => null),
+      builder: (context, snap) {
+        final hash = snap.data;
+        if (hash == null) return const SizedBox.shrink();
+        return ListTile(
+          leading: const Icon(Icons.fingerprint),
+          title: const Text('Signature hash (for Microsoft sign-in)'),
+          subtitle: SelectableText(hash),
+          trailing: IconButton(
+            tooltip: 'Copy signature hash',
+            icon: const Icon(Icons.copy),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: hash));
+              if (context.mounted) showMessage(context, 'Copied');
+            },
+          ),
+        );
+      },
     );
   }
 }
