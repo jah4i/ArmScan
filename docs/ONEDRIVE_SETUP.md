@@ -1,4 +1,8 @@
-# OneDrive setup (needs Sean)
+# OneDrive setup
+
+**Status (2026-11-25):** app registered; client ID `cadbdd9e-b545-4642-9bb9-1008d77dbd07` is built in.
+iOS sign-in is ready once the iOS platform (bundle ID `com.armscan.armscan`) is added in Azure → Authentication.
+Android still needs the signing-key hash (step 3) and `ARMSCAN_MS_ANDROID_REDIRECT`.
 
 OneDrive sign-in needs a free Microsoft Entra (Azure) app registration that only the
 account owner can create. Until then the app shows OneDrive as "Not set up yet" and
@@ -19,7 +23,6 @@ everything else works.
 5. Build with the values (nothing secret is stored in code):
    ```
    flutter run \
-     --dart-define=ARMSCAN_MS_CLIENT_ID=<client id> \
      --dart-define=ARMSCAN_MS_ANDROID_REDIRECT=msauth://com.armscan.armscan/<url-encoded hash> \
      -PmsalSignatureHash=<hash>      # or edit android/app/build.gradle.kts
    ```
