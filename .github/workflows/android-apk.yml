@@ -1,0 +1,77 @@
+name: Android APK
+
+# Builds an installable APK on every push to main (or on demand) and
+# publishes it as the "android-latest" GitHub release, so it can be
+# downloaded straight onto a phone.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install packages
+        run: flutter pub get
+
+      - name: Analyze and test
+        run: |
+          flutter analyze
+          flutter test
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Signing hash for Microsoft sign-in (Azure > Android platform)
+        run: |
+          HASH=$(keytool -exportcert -alias androiddebugkey \
+            -keystore android/app/armscan-dev.keystore -storepass android \
+            | openssl sha1 -binary | openssl base64)
+          echo "Package name:   com.armscan.armscan"
+          echo "Signature hash: $HASH"
+          {
+            echo "### Azure Android platform"
+            echo "- Package name: \`com.armscan.armscan\`"
+            echo "- Signature hash: \`$HASH\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish "android-latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk ArmScan.apk
+          NOTES="Latest test build from ${GITHUB_SHA::7}. On your phone: download ArmScan.apk, open it, allow installs from this source if asked, then tap Install."
+          if gh release view android-latest >/dev/null 2>&1; then
+            gh release upload android-latest ArmScan.apk --clobber
+            gh release edit android-latest --notes "$NOTES"
+          else
+            gh release create android-latest ArmScan.apk \
+              --title "ArmScan Android (latest test build)" \
+              --notes "$NOTES" --prerelease
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArmScan-apk
+          path: ArmScan.apk

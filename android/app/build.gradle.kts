@@ -27,16 +27,31 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // TODO(Sean): replace with the base64 signature hash registered in Azure.
+        // Signature hash of armscan-dev.keystore, registered in Azure for
+        // Microsoft sign-in. Change it together with the signing key.
         manifestPlaceholders["msalSignatureHash"] =
-            (project.findProperty("msalSignatureHash") as String?) ?: "REPLACE_WITH_SIGNATURE_HASH"
+            (project.findProperty("msalSignatureHash") as String?) ?: "g+zM9Zq6n3BRC10bbVes7QVBx5k="
+    }
+
+    signingConfigs {
+        // Shared development key, committed on purpose so every build (local
+        // or CI) has the same signature: test installs upgrade in place and
+        // the OneDrive redirect hash never changes. NOT for Play Store
+        // releases, which need a private upload key.
+        create("dev") {
+            storeFile = file("armscan-dev.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("dev")
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("dev")
         }
     }
 }

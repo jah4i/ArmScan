@@ -2,7 +2,10 @@
 
 **Status (2026-11-25):** app registered; client ID `cadbdd9e-b545-4642-9bb9-1008d77dbd07` is built in.
 iOS sign-in is ready once the iOS platform (bundle ID `com.armscan.armscan`) is added in Azure → Authentication.
-Android still needs the signing-key hash (step 3) and `ARMSCAN_MS_ANDROID_REDIRECT`.
+Android: builds are signed with the shared dev key `android/app/armscan-dev.keystore`, so the
+values are fixed and already built in. In Azure → Authentication → Add a platform → Android, enter
+package `com.armscan.armscan` and signature hash `g+zM9Zq6n3BRC10bbVes7QVBx5k=`.
+A Play Store release will need its own private key and a second Android entry in Azure.
 
 OneDrive sign-in needs a free Microsoft Entra (Azure) app registration that only the
 account owner can create. Until then the app shows OneDrive as "Not set up yet" and

@@ -13,6 +13,13 @@ platforms' native scanning engines.
 | OneDrive | MSAL sign-in + Microsoft Graph upload to `OneDrive/ArmScan` (needs setup, see `docs/ONEDRIVE_SETUP.md`) |
 | Search | Home screen searches names and recognised text |
 
+## Install on Android (no computer needed)
+
+Every push to `main` builds an APK and publishes it as the
+[android-latest release](https://github.com/jah4i/ArmScan/releases/tag/android-latest).
+Open that page on the phone, download `ArmScan.apk`, open it, allow installs from your
+browser when Android asks, and tap Install. New builds install over the old one.
+
 ## Run
 
 ```

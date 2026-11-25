@@ -14,8 +14,10 @@ abstract final class OneDriveConfig {
 
   /// Android redirect URI from Azure:
   /// `msauth://com.armscan.armscan/BASE64_SIGNATURE_HASH`
-  static const androidRedirectUri =
-      String.fromEnvironment('ARMSCAN_MS_ANDROID_REDIRECT');
+  static const androidRedirectUri = String.fromEnvironment(
+    'ARMSCAN_MS_ANDROID_REDIRECT',
+    defaultValue: 'msauth://com.armscan.armscan/g%2BzM9Zq6n3BRC10bbVes7QVBx5k%3D',
+  );
 
   /// "common" lets both personal Microsoft accounts and work/school
   /// accounts sign in.
