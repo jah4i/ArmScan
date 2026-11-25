@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/scan_document.dart';
+import '../scanner/paper.dart';
 import 'document_store.dart';
 
 /// Builds a searchable PDF: each page is the scanned image with an invisible
@@ -18,15 +19,24 @@ class PdfService {
   Future<File> buildPdf(DocumentStore store, ScanDocument doc) async {
     final jobs = <_PageJob>[];
     for (final page in doc.pages) {
-      jobs.add(_PageJob(
-        bytes: await store.pageFile(doc, page).readAsBytes(),
-        width: page.width,
-        height: page.height,
-        lines: [
-          for (final l in page.lines)
-            _LineJob(l.text, l.box.left, l.box.top, l.box.width, l.box.height),
-        ],
-      ));
+      jobs.add(
+        _PageJob(
+          bytes: await store.pageFile(doc, page).readAsBytes(),
+          width: page.width,
+          height: page.height,
+          paper: page.paper?.name,
+          lines: [
+            for (final l in page.lines)
+              _LineJob(
+                l.text,
+                l.box.left,
+                l.box.top,
+                l.box.width,
+                l.box.height,
+              ),
+          ],
+        ),
+      );
     }
 
     // PDF assembly runs on a background isolate to keep the UI at 60/120 fps.
@@ -51,9 +61,11 @@ class _PageJob {
     required this.width,
     required this.height,
     required this.lines,
+    this.paper,
   });
   final Uint8List bytes;
   final int width, height;
+  final String? paper;
   final List<_LineJob> lines;
 }
 
@@ -63,21 +75,34 @@ class _DocJob {
   final List<_PageJob> pages;
 }
 
-/// Page width in PDF points (A4 width). Height follows the scan's aspect
-/// ratio so nothing is letterboxed or cropped.
-const double _pageWidthPt = 595.28;
+/// PDF page size in points for a scan of [width] x [height] pixels.
+///
+/// Pages snapped to Letter, Legal or A4 get exactly that size (landscape if
+/// the scan is). Other pages are 8.5 in wide (Letter width) with the height
+/// following the scan, so nothing is letterboxed or cropped.
+@visibleForTesting
+(double, double) pdfPageSize(PaperSize? paper, int width, int height) {
+  if (paper != null) return paper.pdfSize(landscape: width > height);
+  const w = 612.0;
+  return (w, height * w / width);
+}
 
 Future<Uint8List> _buildPdfBytes(_DocJob job) async {
   final pdf = pw.Document(title: job.title, creator: 'ArmScan');
 
   for (final page in job.pages) {
-    final scale = _pageWidthPt / page.width;
-    final pageHeight = page.height * scale;
+    final (pageW, pageH) = pdfPageSize(
+      PaperSize.byName(page.paper),
+      page.width,
+      page.height,
+    );
+    final sx = pageW / page.width;
+    final sy = pageH / page.height;
     final image = pw.MemoryImage(page.bytes);
 
     pdf.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat(_pageWidthPt, pageHeight),
+        pageFormat: PdfPageFormat(pageW, pageH),
         margin: pw.EdgeInsets.zero,
         build: (_) => pw.Stack(
           children: [
@@ -85,11 +110,11 @@ Future<Uint8List> _buildPdfBytes(_DocJob job) async {
             for (final line in page.lines)
               if (line.w > 0 && line.h > 0)
                 pw.Positioned(
-                  left: line.x * scale,
-                  top: line.y * scale,
+                  left: line.x * sx,
+                  top: line.y * sy,
                   child: pw.SizedBox(
-                    width: line.w * scale,
-                    height: line.h * scale,
+                    width: line.w * sx,
+                    height: line.h * sy,
                     child: pw.FittedBox(
                       fit: pw.BoxFit.fill,
                       child: pw.Text(
@@ -115,8 +140,14 @@ Future<Uint8List> _buildPdfBytes(_DocJob job) async {
 @visibleForTesting
 String latin1Safe(String s) {
   const replacements = {
-    '‘': "'", '’': "'", '“': '"', '”': '"',
-    '–': '-', '—': '-', '…': '...', '•': '*',
+    '‘': "'",
+    '’': "'",
+    '“': '"',
+    '”': '"',
+    '–': '-',
+    '—': '-',
+    '…': '...',
+    '•': '*',
   };
   final b = StringBuffer();
   for (final rune in s.runes) {

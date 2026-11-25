@@ -1,5 +1,7 @@
 import 'dart:ui' show Rect;
 
+import '../scanner/paper.dart';
+
 /// One recognised line of text on a page, in image pixel coordinates.
 class OcrLine {
   const OcrLine(this.text, this.box);
@@ -8,16 +10,20 @@ class OcrLine {
   final Rect box;
 
   Map<String, dynamic> toJson() => {
-        't': text,
-        'b': [box.left, box.top, box.width, box.height],
-      };
+    't': text,
+    'b': [box.left, box.top, box.width, box.height],
+  };
 
   factory OcrLine.fromJson(Map<String, dynamic> j) {
     final b = (j['b'] as List).cast<num>();
     return OcrLine(
       j['t'] as String,
       Rect.fromLTWH(
-          b[0].toDouble(), b[1].toDouble(), b[2].toDouble(), b[3].toDouble()),
+        b[0].toDouble(),
+        b[1].toDouble(),
+        b[2].toDouble(),
+        b[3].toDouble(),
+      ),
     );
   }
 }
@@ -28,13 +34,26 @@ class ScanPage {
     required this.fileName,
     required this.width,
     required this.height,
+    this.original,
+    this.mode = ColorMode.color,
+    this.paper,
     this.text,
     this.lines = const [],
   });
 
+  /// The finished page image (colour mode and paper size applied).
   final String fileName;
   final int width;
   final int height;
+
+  /// The cropped colour photo the page was made from, kept so the colour
+  /// mode can be changed later. Null for pages saved before v0.3.
+  final String? original;
+
+  final ColorMode mode;
+
+  /// Standard paper size; the PDF page uses it. Null means "as scanned".
+  final PaperSize? paper;
 
   /// Full recognised text, null until OCR has run.
   String? text;
@@ -45,22 +64,28 @@ class ScanPage {
   bool get hasOcr => text != null;
 
   Map<String, dynamic> toJson() => {
-        'file': fileName,
-        'w': width,
-        'h': height,
-        if (text != null) 'text': text,
-        if (lines.isNotEmpty) 'lines': lines.map((l) => l.toJson()).toList(),
-      };
+    'file': fileName,
+    'w': width,
+    'h': height,
+    if (original != null) 'orig': original,
+    'mode': mode.name,
+    if (paper != null) 'paper': paper!.name,
+    if (text != null) 'text': text,
+    if (lines.isNotEmpty) 'lines': lines.map((l) => l.toJson()).toList(),
+  };
 
   factory ScanPage.fromJson(Map<String, dynamic> j) => ScanPage(
-        fileName: j['file'] as String,
-        width: j['w'] as int,
-        height: j['h'] as int,
-        text: j['text'] as String?,
-        lines: ((j['lines'] as List?) ?? const [])
-            .map((e) => OcrLine.fromJson(Map<String, dynamic>.from(e as Map)))
-            .toList(),
-      );
+    fileName: j['file'] as String,
+    width: j['w'] as int,
+    height: j['h'] as int,
+    original: j['orig'] as String?,
+    mode: ColorMode.byName(j['mode'] as String?),
+    paper: PaperSize.byName(j['paper'] as String?),
+    text: j['text'] as String?,
+    lines: ((j['lines'] as List?) ?? const [])
+        .map((e) => OcrLine.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList(),
+  );
 }
 
 /// A multipage scanned document.
@@ -99,25 +124,25 @@ class ScanDocument {
   }
 
   Map<String, dynamic> toJson() => {
-        'version': 1,
-        'id': id,
-        'name': name,
-        'createdAt': createdAt.toIso8601String(),
-        'updatedAt': updatedAt.toIso8601String(),
-        'pages': pages.map((p) => p.toJson()).toList(),
-        if (oneDriveUrl != null) 'oneDriveUrl': oneDriveUrl,
-      };
+    'version': 1,
+    'id': id,
+    'name': name,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'pages': pages.map((p) => p.toJson()).toList(),
+    if (oneDriveUrl != null) 'oneDriveUrl': oneDriveUrl,
+  };
 
   factory ScanDocument.fromJson(Map<String, dynamic> j) => ScanDocument(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        createdAt: DateTime.parse(j['createdAt'] as String),
-        updatedAt: DateTime.parse(j['updatedAt'] as String),
-        pages: (j['pages'] as List)
-            .map((e) => ScanPage.fromJson(Map<String, dynamic>.from(e as Map)))
-            .toList(),
-        oneDriveUrl: j['oneDriveUrl'] as String?,
-      );
+    id: j['id'] as String,
+    name: j['name'] as String,
+    createdAt: DateTime.parse(j['createdAt'] as String),
+    updatedAt: DateTime.parse(j['updatedAt'] as String),
+    pages: (j['pages'] as List)
+        .map((e) => ScanPage.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList(),
+    oneDriveUrl: j['oneDriveUrl'] as String?,
+  );
 }
 
 /// Default name, e.g. "Scan 2026-11-25 14.51". Uses only characters that are

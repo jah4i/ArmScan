@@ -7,20 +7,22 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/scan_document.dart';
+import '../scanner/captured_page.dart';
 import 'ocr_service.dart';
 
 /// Local-first storage for scanned documents.
 ///
 /// Layout on disk (inside the app's private documents directory):
 ///   `documents/{id}/meta.json`
-///   `documents/{id}/{page}.jpg`
+///   `documents/{id}/{page}.jpg`        finished page (B&W, Gray or Color)
+///   `documents/{id}/{page}.orig.jpg`   cropped colour original
 ///
 /// Everything is saved on the device first. Exports (PDF, OneDrive) are
 /// produced from this store on demand.
 class DocumentStore extends ChangeNotifier {
   DocumentStore({OcrService? ocr, Directory? rootOverride})
-      : _ocr = ocr ?? OcrService(),
-        _rootOverride = rootOverride; // ignore: prefer_initializing_formals
+    : _ocr = ocr ?? OcrService(),
+      _rootOverride = rootOverride; // ignore: prefer_initializing_formals
 
   final OcrService _ocr;
   final Directory? _rootOverride;
@@ -77,9 +79,9 @@ class DocumentStore extends ChangeNotifier {
     }
   }
 
-  /// Creates a document from scanner output. Images are moved into the
-  /// store; OCR starts in the background so the UI is never blocked.
-  Future<ScanDocument> createFromImages(List<String> imagePaths) async {
+  /// Creates a document from reviewed scanner output. Images are moved into
+  /// the store; OCR starts in the background so the UI is never blocked.
+  Future<ScanDocument> createFromPages(List<CapturedPage> captured) async {
     final now = DateTime.now();
     final doc = ScanDocument(
       id: _uuid.v4(),
@@ -89,7 +91,7 @@ class DocumentStore extends ChangeNotifier {
       pages: [],
     );
     await dirFor(doc).create(recursive: true);
-    doc.pages = await _importPages(doc, imagePaths);
+    doc.pages = await _importPages(doc, captured);
     await _save(doc);
     _docs.insert(0, doc);
     notifyListeners();
@@ -97,8 +99,8 @@ class DocumentStore extends ChangeNotifier {
     return doc;
   }
 
-  Future<void> addPages(ScanDocument doc, List<String> imagePaths) async {
-    doc.pages = [...doc.pages, ...await _importPages(doc, imagePaths)];
+  Future<void> addPages(ScanDocument doc, List<CapturedPage> captured) async {
+    doc.pages = [...doc.pages, ...await _importPages(doc, captured)];
     await _touch(doc);
     _runOcr(doc);
   }
@@ -120,8 +122,10 @@ class DocumentStore extends ChangeNotifier {
 
   Future<void> deletePage(ScanDocument doc, ScanPage page) async {
     doc.pages = doc.pages.where((p) => p != page).toList();
-    final f = pageFile(doc, page);
-    if (await f.exists()) await f.delete();
+    for (final name in [page.fileName, ?page.original]) {
+      final f = File('${dirFor(doc).path}/$name');
+      if (await f.exists()) await f.delete();
+    }
     if (doc.pages.isEmpty) {
       await delete(doc);
     } else {
@@ -145,22 +149,44 @@ class DocumentStore extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   Future<List<ScanPage>> _importPages(
-      ScanDocument doc, List<String> imagePaths) async {
+    ScanDocument doc,
+    List<CapturedPage> captured,
+  ) async {
     final pages = <ScanPage>[];
-    for (final src in imagePaths) {
-      final ext = src.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
-      final name = '${_uuid.v4()}.$ext';
-      final dest = File('${dirFor(doc).path}/$name');
-      final source = File(src);
-      try {
-        await source.rename(dest.path); // fast path: same volume
-      } on FileSystemException {
-        await source.copy(dest.path);
+    for (final c in captured) {
+      final id = _uuid.v4();
+      final name = '$id.jpg';
+      final dest = await _moveInto(doc, c.rendered, name);
+      String? original;
+      if (c.original != c.rendered) {
+        original = '$id.orig.jpg';
+        await _moveInto(doc, c.original, original);
       }
       final size = await _imageSize(dest);
-      pages.add(ScanPage(fileName: name, width: size.$1, height: size.$2));
+      pages.add(
+        ScanPage(
+          fileName: name,
+          width: size.$1,
+          height: size.$2,
+          original: original,
+          mode: c.mode,
+          paper: c.paper,
+        ),
+      );
     }
     return pages;
+  }
+
+  Future<File> _moveInto(ScanDocument doc, String src, String name) async {
+    final dest = File('${dirFor(doc).path}/$name');
+    final source = File(src);
+    try {
+      await source.rename(dest.path); // fast path: same volume
+    } on FileSystemException {
+      await source.copy(dest.path);
+      await source.delete().catchError((_) => source);
+    }
+    return dest;
   }
 
   /// Reads only the image header; does not decode pixels.

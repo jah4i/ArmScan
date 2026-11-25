@@ -48,11 +48,13 @@ class _DocumentScreenState extends State<DocumentScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Save')),
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
@@ -68,16 +70,19 @@ class _DocumentScreenState extends State<DocumentScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Delete this scan?'),
         content: Text(
-            '"${doc.name}" and its ${doc.pages.length} page(s) will be removed '
-            'from this device. Copies already saved to OneDrive or Files are '
-            'not affected.'),
+          '"${doc.name}" and its ${doc.pages.length} page(s) will be removed '
+          'from this device. Copies already saved to OneDrive or Files are '
+          'not affected.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -130,14 +135,19 @@ class _DocumentScreenState extends State<DocumentScreen> {
           ),
           body: ReorderableListView.builder(
             padding: const EdgeInsets.fromLTRB(
-                ArmSpacing.md, 0, ArmSpacing.md, ArmSpacing.lg),
+              ArmSpacing.md,
+              0,
+              ArmSpacing.md,
+              ArmSpacing.lg,
+            ),
             header: Padding(
               padding: const EdgeInsets.only(bottom: ArmSpacing.sm + 4),
               child: Text(
                 '${doc.pages.length} ${doc.pages.length == 1 ? 'page' : 'pages'}'
                 '${doc.pages.length > 1 ? '  ·  Hold and drag to reorder' : ''}',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ),
             footer: Padding(
@@ -146,11 +156,14 @@ class _DocumentScreenState extends State<DocumentScreen> {
                 onPressed: _busy != _Busy.none
                     ? null
                     : () => _run(_Busy.add, () async {
-                          final paths = await s.scanner.scan(context);
-                          if (paths.isNotEmpty) {
-                            await s.store.addPages(doc, paths);
-                          }
-                        }),
+                        final pages = await s.scanner.scan(
+                          context,
+                          saveLabel: 'Add',
+                        );
+                        if (pages.isNotEmpty) {
+                          await s.store.addPages(doc, pages);
+                        }
+                      }),
                 icon: const Icon(Icons.add),
                 label: const Text('Add pages'),
               ),
@@ -166,10 +179,12 @@ class _DocumentScreenState extends State<DocumentScreen> {
                   index: i,
                   page: page,
                   doc: doc,
-                  onOpen: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => PageViewerScreen(
-                        documentId: doc.id, initialPage: i),
-                  )),
+                  onOpen: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          PageViewerScreen(documentId: doc.id, initialPage: i),
+                    ),
+                  ),
                   onDelete: () => _deletePage(doc, page),
                 ),
               );
@@ -184,8 +199,10 @@ class _DocumentScreenState extends State<DocumentScreen> {
             }),
             onOneDrive: () => _run(_Busy.onedrive, () async {
               if (!s.oneDrive.isConfigured) {
-                showMessage(context,
-                    'OneDrive is not set up in this build yet. See Settings.');
+                showMessage(
+                  context,
+                  'OneDrive is not set up in this build yet. See Settings.',
+                );
                 return;
               }
               await s.uploadToOneDrive(doc);
@@ -193,9 +210,9 @@ class _DocumentScreenState extends State<DocumentScreen> {
                 showMessage(context, 'Saved to OneDrive / ArmScan');
               }
             }),
-            onText: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => TextScreen(documentId: doc.id),
-            )),
+            onText: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => TextScreen(documentId: doc.id)),
+            ),
             savedToOneDrive: doc.oneDriveUrl != null,
           ),
         );
@@ -253,14 +270,20 @@ class _PageCard extends StatelessWidget {
             padding: const EdgeInsets.only(left: ArmSpacing.md),
             child: Row(
               children: [
-                Text('Page ${index + 1}',
-                    style: theme.textTheme.labelLarge
-                        ?.copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                  'Page ${index + 1}',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(width: ArmSpacing.sm),
                 if (!page.hasOcr)
-                  Text('Reading text…',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant)),
+                  Text(
+                    'Reading text…',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Delete page ${index + 1}',
@@ -271,8 +294,10 @@ class _PageCard extends StatelessWidget {
                   index: index,
                   child: const Padding(
                     padding: EdgeInsets.all(12),
-                    child: Icon(Icons.drag_handle,
-                        semanticLabel: 'Drag to reorder'),
+                    child: Icon(
+                      Icons.drag_handle,
+                      semanticLabel: 'Drag to reorder',
+                    ),
                   ),
                 ),
               ],
@@ -388,16 +413,21 @@ class _Action extends StatelessWidget {
                           dimension: 20,
                           child: CircularProgressIndicator(strokeWidth: 2.5),
                         )
-                      : Icon(icon,
-                          color: onTap == null ? color : ArmColors.gold),
+                      : Icon(
+                          icon,
+                          color: onTap == null ? color : ArmColors.gold,
+                        ),
                 ),
                 const SizedBox(height: 4),
                 ExcludeSemantics(
-                  child: Text(label,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: color)),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: color,
+                    ),
+                  ),
                 ),
               ],
             ),

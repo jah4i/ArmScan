@@ -8,8 +8,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../app/theme.dart';
+import 'captured_page.dart';
 import 'document_detector.dart';
 import 'page_processor.dart';
+import 'review_screen.dart';
 
 enum _Phase { starting, live, capturing, review, error }
 
@@ -17,10 +19,20 @@ enum _Phase { starting, live, capturing, review, error }
 ///
 /// Every preview frame is checked for a page outline, which is drawn on top
 /// of the camera image. When the outline holds steady the page is captured
-/// automatically, cropped and straightened, then shown for approval:
-/// Retake, Next page, or Done. Pops with the list of saved page images.
+/// automatically, cropped, straightened and cleaned up, then shown for
+/// approval: Retake, Next page, or Done. Done opens the review grid.
+///
+/// Pages are collected in [session]. Pops with `true` when the user saved,
+/// `false` when the scan was cancelled or discarded.
 class ScannerScreen extends StatefulWidget {
-  const ScannerScreen({super.key});
+  const ScannerScreen({
+    super.key,
+    required this.session,
+    this.saveLabel = 'Save',
+  });
+
+  final ScanSession session;
+  final String saveLabel;
 
   @override
   State<ScannerScreen> createState() => _ScannerScreenState();
@@ -50,9 +62,9 @@ class _ScannerScreenState extends State<ScannerScreen>
   bool _frameBusy = false;
   DateTime _lastFrame = DateTime.fromMillisecondsSinceEpoch(0);
 
-  final List<String> _pages = [];
-  String? _pending; // processed page waiting for approval
-  bool _pendingCropped = true;
+  List<CapturedPage> get _pages => widget.session.pages;
+  CapturedPage? _pending; // processed page waiting for approval
+  bool _reviewOpen = false;
 
   @override
   void initState() {
@@ -108,11 +120,13 @@ class _ScannerScreenState extends State<ScannerScreen>
       _controller = controller;
       await _resumeLive();
     } on CameraException catch (e) {
-      _fail(e.code == 'CameraAccessDenied' ||
-              e.code == 'CameraAccessDeniedWithoutPrompt'
-          ? 'ArmScan needs camera access to scan. You can allow it in '
-              'your phone\'s Settings > Apps > ArmScan > Permissions.'
-          : 'The camera could not start (${e.description ?? e.code}).');
+      _fail(
+        e.code == 'CameraAccessDenied' ||
+                e.code == 'CameraAccessDeniedWithoutPrompt'
+            ? 'ArmScan needs camera access to scan. You can allow it in '
+                  'your phone\'s Settings > Apps > ArmScan > Permissions.'
+            : 'The camera could not start (${e.description ?? e.code}).',
+      );
     } catch (e) {
       _fail('The camera could not start ($e).');
     }
@@ -128,7 +142,7 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   Future<void> _resumeLive() async {
     final c = _controller;
-    if (c == null) return;
+    if (c == null || _reviewOpen) return;
     _quad = null;
     _lastRaw = null;
     _steady = 0;
@@ -177,8 +191,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     // Sensor frames are landscape; rotate by the sensor orientation.
-    final clockwise =
-        (_controller?.description.sensorOrientation ?? 90) != 270;
+    final clockwise = (_controller?.description.sensorOrientation ?? 90) != 270;
     final ow = sh, oh = sw; // rotated size
     final out = Uint8List(ow * oh);
     for (var oy = 0; oy < oh; oy++) {
@@ -231,13 +244,25 @@ class _ScannerScreenState extends State<ScannerScreen>
       if (_torch) await c.setFlashMode(FlashMode.off);
       final dir = await getTemporaryDirectory();
       final out = '${dir.path}/page_${const Uuid().v4()}.jpg';
-      final cropped = await PageProcessor.process(shot.path, out,
-          hint: hint, hintAspect: _previewAspect);
+      final cropped = await PageProcessor.process(
+        shot.path,
+        out,
+        hint: hint,
+        hintAspect: _previewAspect,
+      );
       unawaited(File(shot.path).delete().catchError((_) => File(shot.path)));
-      if (!mounted) return;
+      final page = await finishPage(
+        out,
+        mode: widget.session.mode,
+        paper: widget.session.paper,
+        cropped: cropped,
+      );
+      if (!mounted) {
+        page.deleteFiles();
+        return;
+      }
       setState(() {
-        _pending = out;
-        _pendingCropped = cropped;
+        _pending = page;
         _phase = _Phase.review;
       });
     } catch (e) {
@@ -251,9 +276,8 @@ class _ScannerScreenState extends State<ScannerScreen>
   // ---------------------------------------------------------------- review
 
   Future<void> _retake() async {
-    final p = _pending;
+    _pending?.deleteFiles();
     _pending = null;
-    if (p != null) unawaited(File(p).delete().catchError((_) => File(p)));
     await _resumeLive();
   }
 
@@ -263,36 +287,70 @@ class _ScannerScreenState extends State<ScannerScreen>
     await _resumeLive();
   }
 
-  void _keepAndFinish() {
+  Future<void> _keepAndFinish() async {
     if (_pending != null) _pages.add(_pending!);
     _pending = null;
-    Navigator.of(context).pop(List<String>.from(_pages));
+    await _openReview();
   }
 
-  void _finish() => Navigator.of(context).pop(List<String>.from(_pages));
+  /// Shows all pages for reordering, deleting and colour/size changes.
+  Future<void> _openReview() async {
+    final c = _controller;
+    _reviewOpen = true;
+    setState(() => _phase = _Phase.capturing);
+    try {
+      if (c != null && c.value.isStreamingImages) await c.stopImageStream();
+      if (_torch) await c?.setFlashMode(FlashMode.off);
+    } catch (_) {}
+    if (!mounted) return;
+    final action = await Navigator.of(context).push<ReviewAction>(
+      MaterialPageRoute(
+        builder: (_) =>
+            ReviewScreen(session: widget.session, saveLabel: widget.saveLabel),
+      ),
+    );
+    _reviewOpen = false;
+    if (!mounted) return;
+    switch (action) {
+      case ReviewAction.save:
+        Navigator.of(context).pop(true);
+      case ReviewAction.discard:
+        widget.session.discardAll();
+        Navigator.of(context).pop(false);
+      case ReviewAction.addMore || null:
+        await _resumeLive();
+    }
+  }
 
   Future<void> _close() async {
     if (_pages.isEmpty) {
-      Navigator.of(context).pop(const <String>[]);
+      Navigator.of(context).pop(false);
       return;
     }
-    final keep = await showDialog<bool>(
+    final n = _pages.length;
+    final review = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Keep ${_pages.length} scanned '
-            '${_pages.length == 1 ? 'page' : 'pages'}?'),
+        title: Text('Discard $n scanned ${n == 1 ? 'page' : 'pages'}?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Discard')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Discard'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Keep')),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Review pages'),
+          ),
         ],
       ),
     );
-    if (!mounted || keep == null) return;
-    Navigator.of(context).pop(keep ? List<String>.from(_pages) : <String>[]);
+    if (!mounted || review == null) return;
+    if (review) {
+      await _openReview();
+    } else {
+      widget.session.discardAll();
+      Navigator.of(context).pop(false);
+    }
   }
 
   Future<void> _toggleTorch() async {
@@ -381,7 +439,8 @@ class _ScannerScreenState extends State<ScannerScreen>
                   )
                 else
                   const Center(
-                      child: CircularProgressIndicator(color: ArmColors.gold)),
+                    child: CircularProgressIndicator(color: ArmColors.gold),
+                  ),
                 if (_phase == _Phase.capturing)
                   const ColoredBox(color: Color(0x55000000)),
                 Positioned(
@@ -394,11 +453,11 @@ class _ScannerScreenState extends State<ScannerScreen>
             ),
           ),
           _BottomBar(
-            lastPage: _pages.isEmpty ? null : _pages.last,
+            lastPage: _pages.isEmpty ? null : _pages.last.rendered,
             pageCount: _pages.length,
             busy: _phase != _Phase.live,
             onShutter: _capture,
-            onDone: _pages.isEmpty ? null : _finish,
+            onDone: _pages.isEmpty ? null : _openReview,
           ),
         ],
       ),
@@ -413,7 +472,11 @@ class _ScannerScreenState extends State<ScannerScreen>
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                ArmSpacing.sm, ArmSpacing.sm, ArmSpacing.md, 0),
+              ArmSpacing.sm,
+              ArmSpacing.sm,
+              ArmSpacing.md,
+              0,
+            ),
             child: Row(
               children: [
                 IconButton(
@@ -422,12 +485,20 @@ class _ScannerScreenState extends State<ScannerScreen>
                   icon: const Icon(Icons.close, color: Colors.white),
                 ),
                 const SizedBox(width: ArmSpacing.xs),
-                Text('Page $n',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                        color: Colors.white, fontWeight: FontWeight.w700)),
+                Text(
+                  'Page $n',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const Spacer(),
-                if (!_pendingCropped)
-                  const _HintPill(text: 'No edges found. Full photo kept'),
+                _HintPill(
+                  text: _pending!.cropped
+                      ? '${_pending!.paper?.label ?? 'As scanned'}  ·  '
+                            '${_pending!.mode.label}'
+                      : 'No edges found. Full photo kept',
+                ),
               ],
             ),
           ),
@@ -442,16 +513,22 @@ class _ScannerScreenState extends State<ScannerScreen>
                       BoxShadow(color: Color(0x66000000), blurRadius: 24),
                     ],
                   ),
-                  child: Image.file(File(_pending!),
-                      fit: BoxFit.contain,
-                      semanticLabel: 'Scanned page $n'),
+                  child: Image.file(
+                    File(_pending!.rendered),
+                    fit: BoxFit.contain,
+                    semanticLabel: 'Scanned page $n',
+                  ),
                 ),
               ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                ArmSpacing.md, 0, ArmSpacing.md, ArmSpacing.md),
+              ArmSpacing.md,
+              0,
+              ArmSpacing.md,
+              ArmSpacing.md,
+            ),
             child: Row(
               children: [
                 Expanded(
@@ -500,16 +577,22 @@ class _ScannerScreenState extends State<ScannerScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.no_photography_outlined,
-                color: ArmColors.gold, size: 48),
+            const Icon(
+              Icons.no_photography_outlined,
+              color: ArmColors.gold,
+              size: 48,
+            ),
             const SizedBox(height: ArmSpacing.md),
-            Text(_error ?? 'Camera unavailable',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 16)),
+            Text(
+              _error ?? 'Camera unavailable',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+            ),
             const SizedBox(height: ArmSpacing.lg),
             FilledButton(
-                onPressed: () => Navigator.of(context).pop(const <String>[]),
-                child: const Text('Close')),
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Close'),
+            ),
           ],
         ),
       ),
@@ -538,7 +621,9 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: ArmSpacing.sm, vertical: ArmSpacing.xs),
+        horizontal: ArmSpacing.sm,
+        vertical: ArmSpacing.xs,
+      ),
       child: Row(
         children: [
           IconButton(
@@ -550,8 +635,10 @@ class _TopBar extends StatelessWidget {
           IconButton(
             tooltip: torch ? 'Turn light off' : 'Turn light on',
             onPressed: onToggleTorch,
-            icon: Icon(torch ? Icons.flash_on : Icons.flash_off,
-                color: torch ? ArmColors.gold : Colors.white),
+            icon: Icon(
+              torch ? Icons.flash_on : Icons.flash_off,
+              color: torch ? ArmColors.gold : Colors.white,
+            ),
           ),
           const SizedBox(width: ArmSpacing.xs),
           Semantics(
@@ -569,12 +656,15 @@ class _TopBar extends StatelessWidget {
                   color: auto ? ArmColors.gold : const Color(0x33FFFFFF),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Text(auto ? 'AUTO' : 'MANUAL',
-                    style: TextStyle(
-                        color: auto ? ArmColors.black : Colors.white,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.8,
-                        fontSize: 13)),
+                child: Text(
+                  auto ? 'AUTO' : 'MANUAL',
+                  style: TextStyle(
+                    color: auto ? ArmColors.black : Colors.white,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                    fontSize: 13,
+                  ),
+                ),
               ),
             ),
           ),
@@ -604,7 +694,11 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          ArmSpacing.lg, ArmSpacing.md, ArmSpacing.lg, ArmSpacing.lg),
+        ArmSpacing.lg,
+        ArmSpacing.md,
+        ArmSpacing.lg,
+        ArmSpacing.lg,
+      ),
       child: Row(
         children: [
           SizedBox(
@@ -618,14 +712,16 @@ class _BottomBar extends StatelessWidget {
                       Positioned.fill(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.white, width: 2),
+                            border: Border.all(color: Colors.white, width: 2),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(4),
-                            child: Image.file(File(lastPage!),
-                                fit: BoxFit.cover, cacheWidth: 160),
+                            child: Image.file(
+                              File(lastPage!),
+                              fit: BoxFit.cover,
+                              cacheWidth: 160,
+                            ),
                           ),
                         ),
                       ),
@@ -635,11 +731,14 @@ class _BottomBar extends StatelessWidget {
                         child: CircleAvatar(
                           radius: 12,
                           backgroundColor: ArmColors.gold,
-                          child: Text('$pageCount',
-                              style: const TextStyle(
-                                  color: ArmColors.black,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w800)),
+                          child: Text(
+                            '$pageCount',
+                            style: const TextStyle(
+                              color: ArmColors.black,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -679,8 +778,10 @@ class _BottomBar extends StatelessWidget {
                 minimumSize: const Size(64, 48),
                 padding: EdgeInsets.zero,
               ),
-              child: const Text('Done',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              child: const Text(
+                'Done',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -701,9 +802,14 @@ class _HintPill extends StatelessWidget {
         color: const Color(0xCC111111),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(text,
-          style: const TextStyle(
-              color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -726,29 +832,36 @@ class _QuadPainter extends CustomPainter {
     final q = quad;
     if (q == null) return;
     final path = Path()
-      ..addPolygon(
-          [for (final p in q.points) Offset(p.dx * size.width, p.dy * size.height)],
-          true);
+      ..addPolygon([
+        for (final p in q.points) Offset(p.dx * size.width, p.dy * size.height),
+      ], true);
     final color = Color.lerp(Colors.white, ArmColors.gold, progress)!;
     canvas.drawPath(
-        path,
-        Paint()
-          ..color = ArmColors.gold.withValues(alpha: capturing ? 0.35 : 0.18));
+      path,
+      Paint()
+        ..color = ArmColors.gold.withValues(alpha: capturing ? 0.35 : 0.18),
+    );
     canvas.drawPath(
-        path,
-        Paint()
-          ..color = color
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = size.shortestSide * 0.008
-          ..strokeJoin = StrokeJoin.round);
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.shortestSide * 0.008
+        ..strokeJoin = StrokeJoin.round,
+    );
     final r = size.shortestSide * 0.018;
     for (final p in q.points) {
       canvas.drawCircle(
-          Offset(p.dx * size.width, p.dy * size.height), r, Paint()..color = color);
+        Offset(p.dx * size.width, p.dy * size.height),
+        r,
+        Paint()..color = color,
+      );
     }
   }
 
   @override
   bool shouldRepaint(_QuadPainter old) =>
-      old.quad != quad || old.progress != progress || old.capturing != capturing;
+      old.quad != quad ||
+      old.progress != progress ||
+      old.capturing != capturing;
 }
