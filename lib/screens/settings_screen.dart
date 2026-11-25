@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../app/services.dart';
 import '../app/theme.dart';
 import '../config/onedrive_config.dart';
+import 'help_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -31,6 +32,17 @@ class SettingsScreen extends StatelessWidget {
           final od = s.oneDrive;
           return ListView(
             children: [
+              section('Help'),
+              ListTile(
+                leading: const Icon(Icons.help_outline),
+                title: const Text('How to use ArmScan'),
+                subtitle: const Text(
+                    'Scanning, page sizes, B&W, PDF, search and OneDrive'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const HelpScreen()),
+                ),
+              ),
               section('Microsoft OneDrive'),
               if (!od.isConfigured)
                 const ListTile(
@@ -88,7 +100,7 @@ class SettingsScreen extends StatelessWidget {
               const ListTile(
                 leading: Icon(Icons.info_outline),
                 title: Text('ArmScan'),
-                subtitle: Text('Version 0.1.0'),
+                subtitle: Text('Version 0.5.0'),
               ),
             ],
           );

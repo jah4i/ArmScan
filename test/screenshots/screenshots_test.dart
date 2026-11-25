@@ -13,6 +13,7 @@ import 'package:armscan/scanner/captured_page.dart';
 import 'package:armscan/scanner/paper.dart';
 import 'package:armscan/scanner/review_screen.dart';
 import 'package:armscan/screens/document_screen.dart';
+import 'package:armscan/screens/help_screen.dart';
 import 'package:armscan/services/document_store.dart';
 import 'package:armscan/services/onedrive_service.dart';
 import 'package:armscan/services/settings.dart';
@@ -195,6 +196,18 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/review_light.png'),
     );
+  });
+
+  testWidgets('help light', (tester) async {
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    final s = await _services(tester, empty: true);
+    await tester.pumpWidget(ArmScanApp(services: s));
+    final nav = tester.state<NavigatorState>(find.byType(Navigator));
+    nav.push(MaterialPageRoute<void>(builder: (_) => const HelpScreen()));
+    await tester.pumpAndSettle();
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/help_light.png'));
   });
 
   testWidgets('empty light', (tester) async {
