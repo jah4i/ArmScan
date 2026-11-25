@@ -1,0 +1,11 @@
+{
+  "authorization_user_agent": "DEFAULT",
+  "broker_redirect_uri_registered": false,
+  "account_mode": "SINGLE",
+  "authorities": [
+    {
+      "type": "AAD",
+      "audience": { "type": "AzureADandPersonalMicrosoftAccount", "tenant_id": "common" }
+    }
+  ]
+}
