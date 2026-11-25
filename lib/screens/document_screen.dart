@@ -146,7 +146,7 @@ class _DocumentScreenState extends State<DocumentScreen> {
                 onPressed: _busy != _Busy.none
                     ? null
                     : () => _run(_Busy.add, () async {
-                          final paths = await s.scanner.scan();
+                          final paths = await s.scanner.scan(context);
                           if (paths.isNotEmpty) {
                             await s.store.addPages(doc, paths);
                           }
@@ -303,11 +303,10 @@ class _ActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      decoration: const BoxDecoration(
+        color: ArmColors.black,
+        border: Border(top: BorderSide(color: ArmColors.gold, width: 3)),
       ),
       child: SafeArea(
         top: false,
@@ -366,10 +365,9 @@ class _Action extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final color = onTap == null && !loading
-        ? scheme.onSurface.withValues(alpha: 0.38)
-        : scheme.onSurface;
+        ? Colors.white.withValues(alpha: 0.38)
+        : Colors.white;
     return Expanded(
       child: Semantics(
         button: true,
@@ -390,7 +388,8 @@ class _Action extends StatelessWidget {
                           dimension: 20,
                           child: CircularProgressIndicator(strokeWidth: 2.5),
                         )
-                      : Icon(icon, color: color),
+                      : Icon(icon,
+                          color: onTap == null ? color : ArmColors.gold),
                 ),
                 const SizedBox(height: 4),
                 ExcludeSemantics(

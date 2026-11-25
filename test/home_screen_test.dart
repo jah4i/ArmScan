@@ -23,7 +23,7 @@ void main() {
     await tester.pumpWidget(ArmScanApp(services: services));
     await tester.pump();
 
-    expect(find.text('ArmScan'), findsOneWidget);
+    expect(find.bySemanticsLabel('ArmScan'), findsOneWidget);
     expect(find.text('No scans yet'), findsOneWidget);
     expect(find.text('Scan document'), findsOneWidget);
     expect(find.byTooltip('Import from photos'), findsOneWidget);

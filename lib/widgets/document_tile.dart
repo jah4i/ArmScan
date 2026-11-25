@@ -24,7 +24,10 @@ class DocumentTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Padding(
+        child: Container(
+          decoration: const BoxDecoration(
+            border: Border(left: BorderSide(color: ArmColors.gold, width: 5)),
+          ),
           padding: const EdgeInsets.all(ArmSpacing.sm + 4),
           child: Row(
             children: [
@@ -62,15 +65,19 @@ class DocumentTile extends StatelessWidget {
                       children: [
                         if (reading)
                           const StatusChip(
-                              icon: Icons.hourglass_top, label: 'Reading text')
+                              icon: Icons.hourglass_top,
+                              label: 'Reading text',
+                              tone: ChipTone.neutral)
                         else if (doc.ocrComplete && doc.fullText.isNotEmpty)
                           const StatusChip(
                               icon: Icons.text_snippet_outlined,
-                              label: 'Searchable'),
+                              label: 'Searchable',
+                              tone: ChipTone.gold),
                         if (doc.oneDriveUrl != null)
                           const StatusChip(
                               icon: Icons.cloud_done_outlined,
-                              label: 'OneDrive'),
+                              label: 'OneDrive',
+                              tone: ChipTone.dark),
                       ],
                     ),
                   ],
@@ -85,31 +92,44 @@ class DocumentTile extends StatelessWidget {
   }
 }
 
+enum ChipTone { gold, dark, neutral }
+
 class StatusChip extends StatelessWidget {
-  const StatusChip({super.key, required this.icon, required this.label});
+  const StatusChip({
+    super.key,
+    required this.icon,
+    required this.label,
+    this.tone = ChipTone.neutral,
+  });
 
   final IconData icon;
   final String label;
+  final ChipTone tone;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final (bg, fg) = switch (tone) {
+      ChipTone.gold => (ArmColors.gold, ArmColors.black),
+      ChipTone.dark => (ArmColors.gray700, Colors.white),
+      ChipTone.neutral => (scheme.surfaceContainerLow, scheme.onSurfaceVariant),
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
+        color: bg,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: scheme.onSurfaceVariant),
+          Icon(icon, size: 14, color: fg),
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
                   fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: scheme.onSurfaceVariant)),
+                  fontWeight: FontWeight.w600,
+                  color: fg)),
         ],
       ),
     );

@@ -29,7 +29,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final s = Services.of(context);
     setState(() => _busy = true);
     try {
-      final paths = await s.scanner.scan(fromGallery: fromGallery);
+      final paths = fromGallery
+          ? await s.scanner.importFromGallery()
+          : await s.scanner.scan(context);
       if (paths.isEmpty || !mounted) return;
       final doc = await s.store.createFromImages(paths);
       if (!mounted) return;
@@ -63,7 +65,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ArmScan'),
+        toolbarHeight: 64,
+        title: Image.asset('assets/brand/logo_on_dark.png',
+            height: 40, semanticLabel: 'ArmScan'),
         actions: [
           IconButton(
             tooltip: 'Settings',
@@ -85,13 +89,14 @@ class _HomeScreenState extends State<HomeScreen> {
           if (all.isEmpty) return const _EmptyState();
 
           final docs = all.where((d) => d.matches(_query)).toList();
+          final pageCount = all.fold<int>(0, (n, d) => n + d.pages.length);
           return CustomScrollView(
             slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(
-                    ArmSpacing.md, ArmSpacing.sm, ArmSpacing.md, ArmSpacing.md),
-                sliver: SliverToBoxAdapter(
-                  child: TextField(
+              SliverToBoxAdapter(
+                child: _Header(
+                  docCount: all.length,
+                  pageCount: pageCount,
+                  search: TextField(
                     controller: _search,
                     onChanged: (v) => setState(() => _query = v),
                     textInputAction: TextInputAction.search,
@@ -112,6 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
+              const SliverToBoxAdapter(child: SizedBox(height: ArmSpacing.md)),
               if (docs.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
@@ -153,6 +159,85 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// Black band under the app bar with library totals and search.
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.docCount,
+    required this.pageCount,
+    required this.search,
+  });
+
+  final int docCount;
+  final int pageCount;
+  final Widget search;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: ArmColors.black,
+      padding: const EdgeInsets.fromLTRB(
+          ArmSpacing.md, ArmSpacing.xs, ArmSpacing.md, ArmSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _Stat(value: '$docCount', label: docCount == 1 ? 'scan' : 'scans'),
+              const SizedBox(width: ArmSpacing.lg),
+              _Stat(value: '$pageCount', label: pageCount == 1 ? 'page' : 'pages'),
+            ],
+          ),
+          const SizedBox(height: ArmSpacing.md),
+          Theme(
+            data: theme.copyWith(
+              inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+                fillColor: Colors.white,
+                hintStyle: const TextStyle(color: Color(0xFF6B6B6B)),
+                prefixIconColor: ArmColors.gray700,
+                suffixIconColor: ArmColors.gray700,
+              ),
+              textSelectionTheme: const TextSelectionThemeData(
+                  cursorColor: ArmColors.black),
+            ),
+            child: DefaultTextStyle.merge(
+              style: const TextStyle(color: ArmColors.black),
+              child: search,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({required this.value, required this.label});
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(value,
+            style: const TextStyle(
+                color: ArmColors.gold,
+                fontSize: 28,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(width: 6),
+        Text(label,
+            style: const TextStyle(
+                color: ArmColors.gray300,
+                fontSize: 15,
+                fontWeight: FontWeight.w500)),
+      ],
+    );
+  }
+}
+
 class _ScanBar extends StatelessWidget {
   const _ScanBar({
     required this.busy,
@@ -166,11 +251,10 @@ class _ScanBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      decoration: const BoxDecoration(
+        color: ArmColors.black,
+        border: Border(top: BorderSide(color: ArmColors.gold, width: 3)),
       ),
       child: SafeArea(
         top: false,
@@ -199,6 +283,8 @@ class _ScanBar extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(56, 52),
                     padding: EdgeInsets.zero,
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: ArmColors.gray500, width: 1.5),
                   ),
                   child: const Icon(Icons.photo_library_outlined,
                       semanticLabel: 'Import from photos'),
@@ -228,12 +314,12 @@ class _EmptyState extends StatelessWidget {
             Container(
               width: 88,
               height: 88,
-              decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.08),
+              decoration: const BoxDecoration(
+                color: ArmColors.gold,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.description_outlined,
-                  size: 40, color: scheme.primary),
+              child: const Icon(Icons.document_scanner_outlined,
+                  size: 40, color: ArmColors.black),
             ),
             const SizedBox(height: ArmSpacing.lg),
             Text('No scans yet',

@@ -1,31 +1,38 @@
-import 'package:cunning_document_scanner/cunning_document_scanner.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
-/// Opens the platform's native document scanner.
-///
-/// * iOS: Apple VisionKit (VNDocumentCameraViewController).
-/// * Android: Google ML Kit Document Scanner (Play services).
-///
-/// Both give live edge detection, automatic capture when the page is steady,
-/// perspective correction, multipage batches and a manual shutter fallback.
+import '../scanner/page_processor.dart';
+import '../scanner/scanner_screen.dart';
+
+/// Entry points for getting pages into ArmScan.
 class ScannerService {
   const ScannerService();
 
-  /// Returns image paths in page order, or an empty list if cancelled.
-  Future<List<String>> scan({bool fromGallery = false}) async {
-    final result = await CunningDocumentScanner.scanDocuments(
-      noOfPages: 100,
-      scannerSource:
-          fromGallery ? ScannerSource.gallery : ScannerSource.camera,
-      output: ScanOutput.images,
-      // "full" adds ML Kit's crop, filter and stain/finger cleanup screen.
-      androidScannerMode: AndroidScannerMode.full,
-      iosScannerOptions: IosScannerOptions(
-        // JPEG keeps files ~5-10x smaller than PNG and exports much faster.
-        imageFormat: IosImageFormat.jpg,
-        jpgCompressionQuality: 0.85,
-        defaultFilter: IosDocumentFilter.color,
+  /// Opens the live scanner. Returns page image paths in order, or an empty
+  /// list if the user cancelled.
+  Future<List<String>> scan(BuildContext context) async {
+    final pages = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const ScannerScreen(),
       ),
     );
-    return result?.images ?? const [];
+    return pages ?? const [];
+  }
+
+  /// Imports photos of documents; each is auto-cropped and straightened.
+  Future<List<String>> importFromGallery() async {
+    final picked = await ImagePicker().pickMultiImage(imageQuality: 100);
+    if (picked.isEmpty) return const [];
+    final dir = await getTemporaryDirectory();
+    final out = <String>[];
+    for (final photo in picked) {
+      final path = '${dir.path}/page_${const Uuid().v4()}.jpg';
+      await PageProcessor.process(photo.path, path);
+      out.add(path);
+    }
+    return out;
   }
 }

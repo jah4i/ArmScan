@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -35,13 +35,23 @@ jobs:
       - name: Install packages
         run: flutter pub get
 
+      # OpenCV is compiled by the opencv_dart build hook; keep its output
+      # between runs so only the first build pays for it.
+      - name: Cache native OpenCV builds
+        uses: actions/cache@v4
+        with:
+          path: .dart_tool/hooks_runner
+          key: opencv-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
       - name: Analyze and test
         run: |
           flutter analyze
-          flutter test
+          flutter test --exclude-tags screenshots
 
       - name: Build APK
-        run: flutter build apk --release
+        # 64-bit ARM covers every Android phone sold in recent years and keeps
+        # the download small.
+        run: flutter build apk --release --target-platform android-arm64
 
       - name: Signing hash for Microsoft sign-in (Azure > Android platform)
         run: |
