@@ -99,6 +99,36 @@ void main() {
     expect(inBetween, lessThan(0.03));
   });
 
+  test('B&W keeps solid black areas solid, like a photocopy', () async {
+    final r = await PageProcessor.render(
+      'test/fixtures/render/solid_page.jpg',
+      '${tmp.path}/solid.jpg',
+      mode: ColorMode.bw,
+      paper: PaperChoice.auto,
+    );
+    final img = cv.imread(r.path, flags: cv.IMREAD_GRAYSCALE);
+    final sx = img.cols / 850, sy = img.rows / 1100;
+    double meanOf(int x0, int y0, int x1, int y1) => cv
+        .mean(
+          img.region(
+            cv.Rect(
+              (x0 * sx).round(),
+              (y0 * sy).round(),
+              ((x1 - x0) * sx).round(),
+              ((y1 - y0) * sy).round(),
+            ),
+          ),
+        )
+        .val1;
+
+    // Inside the black block, away from the white lettering.
+    expect(meanOf(80, 90, 410, 150), lessThan(30));
+    // The red block prints black too.
+    expect(meanOf(500, 100, 760, 180), lessThan(30));
+    // Shadowed blank paper is still white.
+    expect(meanOf(770, 300, 830, 380), greaterThan(235));
+  });
+
   test('Gray evens out the lighting', () async {
     final r = await PageProcessor.render(
       _page,
@@ -125,6 +155,12 @@ void main() {
   test('debug output', () async {
     final out = Platform.environment['ARMSCAN_RENDER_OUT'];
     if (out == null) return;
+    await PageProcessor.render(
+      'test/fixtures/render/solid_page.jpg',
+      '$out/render_solid_bw.jpg',
+      mode: ColorMode.bw,
+      paper: PaperChoice.auto,
+    );
     for (final m in ColorMode.values) {
       await PageProcessor.render(
         _page,

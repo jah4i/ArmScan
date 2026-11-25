@@ -159,7 +159,42 @@ class RenderedPage {
       18,
     ),
   );
-  return (bw, mats);
+
+  // Like a photocopier, anything genuinely dark stays solid black. The
+  // local threshold above only sees edges, so on its own a filled black
+  // area would come out as an outline. "Dark" is judged against the paper
+  // brightness, so shadows on the paper are not filled in.
+  final paperLevel = _percentile(small, 0.90);
+  final smooth = keep(cv.gaussianBlur(gray, (3, 3), 0));
+  final (_, dark) = cv.threshold(
+    smooth,
+    paperLevel * solidDarkFraction,
+    255,
+    cv.THRESH_BINARY_INV,
+  );
+  keep(dark);
+  final copy = keep(cv.subtract(bw, dark));
+  return (copy, mats);
+}
+
+/// Pixels darker than this fraction of the paper brightness print as solid
+/// black in B&W.
+const double solidDarkFraction = 0.55;
+
+/// Brightness below which [fraction] of the pixels of a gray [mat] fall.
+double _percentile(cv.Mat mat, double fraction) {
+  final hist = List<int>.filled(256, 0);
+  final data = mat.data;
+  for (var i = 0; i < data.length; i++) {
+    hist[data[i]]++;
+  }
+  final target = data.length * fraction;
+  var seen = 0;
+  for (var v = 0; v < 256; v++) {
+    seen += hist[v];
+    if (seen >= target) return v.toDouble();
+  }
+  return 255;
 }
 
 bool _process(
